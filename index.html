@@ -10,7 +10,7 @@
 <script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
 <style>
   :root{--bg:#12141a;--card:#282d3a;--head:#20242e;--txt:#ebeef5;--sub:#969eaf;
-        --p0:#2eaa55;--p1:#f09628;--p2:#e13737;--late:#ff6e6e;color-scheme:dark}
+        --p0:#2eaa55;--p1:#f09628;--p2:#e13737;--late:#ff6e6e;--appt:#6eaaff;color-scheme:dark}
   *{box-sizing:border-box}
   [hidden]{display:none!important}
   body{margin:0;background:var(--bg);color:var(--txt);font:16px -apple-system,system-ui,sans-serif;
@@ -24,9 +24,16 @@
   form,.panel{background:var(--head);border-radius:14px;padding:14px;display:grid;gap:10px}
   label.f{font-size:13px;color:var(--sub);display:grid;gap:4px}
   input,select,button{font:inherit;border-radius:10px;border:0;padding:12px;width:100%}
-  input,select{background:var(--card);color:var(--txt)}
+  input,select{background:var(--card);color:var(--txt);min-width:0}
   button{cursor:pointer}
   button:disabled{opacity:.4}
+  .tabs{display:flex;gap:6px;background:var(--head);border-radius:12px;padding:4px;margin-bottom:14px;overflow-x:auto;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tabs button{flex:0 0 auto;width:auto;background:transparent;color:var(--sub);font-weight:600;padding:10px 14px;white-space:nowrap}
+  .tabs button[aria-selected="true"]{background:var(--card);color:var(--txt)}
+  .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--card);border-radius:10px;padding:4px}
+  .seg button{background:transparent;color:var(--sub);font-weight:600;padding:9px}
+  .seg button[aria-pressed="true"]{background:var(--head);color:var(--txt)}
   .prios{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
   .prios label{text-align:center;padding:10px;border-radius:10px;background:var(--card);cursor:pointer;font-weight:600;font-size:14px}
   .prios input{display:none}
@@ -34,6 +41,7 @@
   .prios label:has(input:checked).l0{background:var(--p0)}
   .prios label:has(input:checked).l1{background:var(--p1)}
   .prios label:has(input:checked).l2{background:var(--p2)}
+  .row2{display:grid;grid-template-columns:3fr 2fr;gap:8px}
   .add,.save{background:var(--p0);color:#fff;font-weight:700}
   .task{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:12px;margin-bottom:8px;overflow:hidden}
   .bar{width:8px;align-self:stretch}
@@ -41,19 +49,20 @@
   .t{font-weight:600;overflow-wrap:anywhere}
   .s{font-size:13px;color:var(--sub);margin-top:2px}
   .s .late{color:var(--late)}
+  .s .appt{color:var(--appt)}
   .btns{display:flex;gap:6px;padding-right:8px}
   .btns button{width:auto;padding:10px 12px;font-size:14px;font-weight:600}
   .ok{background:var(--p0);color:#fff}
   .del{background:#3a3f4d;color:var(--sub)}
-  .del.sure{background:var(--p2);color:#fff}
+  .del.sure,.danger.sure{background:var(--p2);color:#fff}
   .done .t{color:var(--sub)}
   .empty{color:var(--sub);padding:8px 2px}
   .warn{background:#3a2326;color:var(--late);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:12px}
   .stand{font-size:12px;color:var(--sub);margin-top:16px}
-  .tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--head);border-radius:12px;padding:4px;margin-bottom:14px}
-  .tabs button{background:transparent;color:var(--sub);font-weight:600;padding:10px}
-  .tabs button[aria-selected="true"]{background:var(--card);color:var(--txt)}
   .hint{font-size:13px;color:var(--sub);margin:0}
+  .tools{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:24px}
+  .tools button{background:var(--card);color:var(--sub);font-weight:600;font-size:14px}
+  #ptitle{font-size:20px;margin:0 0 12px}
 </style>
 </head>
 <body>
@@ -62,10 +71,57 @@
   <span class="dot" id="dot"></span><span id="conn">…</span>
 </header>
 
-<nav class="tabs" role="tablist">
-  <button type="button" id="tab-main" role="tab" aria-selected="true">Aufgaben</button>
-  <button type="button" id="tab-set" role="tab" aria-selected="false">Einstellungen</button>
-</nav>
+<nav class="tabs" role="tablist" id="tabs"></nav>
+
+<div id="main">
+  <div class="warn" id="offline" hidden>Das Display ist gerade offline. Änderungen sind erst wieder möglich, wenn es verbunden ist.</div>
+  <h2 id="ptitle" hidden></h2>
+
+  <form id="f">
+    <div class="seg" id="kindseg">
+      <button type="button" data-k="0" aria-pressed="true">Aufgabe</button>
+      <button type="button" data-k="1" aria-pressed="false">Termin</button>
+    </div>
+    <input id="title" placeholder="Neue Aufgabe…" maxlength="80" autocomplete="off" required>
+    <div class="prios">
+      <label class="l0"><input type="radio" name="p" value="0"><span>Niedrig</span></label>
+      <label class="l1"><input type="radio" name="p" value="1" checked><span>Mittel</span></label>
+      <label class="l2"><input type="radio" name="p" value="2"><span>Hoch</span></label>
+    </div>
+    <div id="taskopts">
+      <select id="rep">
+        <option value="0">Einmalig</option>
+        <option value="1">Täglich</option>
+        <option value="2">Wöchentlich</option>
+        <option value="3">Monatlich</option>
+      </select>
+      <select id="wd" hidden style="margin-top:10px">
+        <option value="1">Montag</option><option value="2">Dienstag</option><option value="3">Mittwoch</option>
+        <option value="4">Donnerstag</option><option value="5">Freitag</option><option value="6">Samstag</option><option value="0">Sonntag</option>
+      </select>
+      <input id="md" type="number" min="1" max="31" value="1" placeholder="Tag im Monat" hidden style="margin-top:10px">
+    </div>
+    <div class="row2" id="apptopts" hidden>
+      <input id="adate" type="date" aria-label="Datum">
+      <input id="atime" type="time" aria-label="Uhrzeit">
+    </div>
+    <button class="add" id="addbtn">Hinzufügen</button>
+  </form>
+
+  <div id="lists"></div>
+
+  <div class="tools" id="pagetools" hidden>
+    <button type="button" id="renamebtn">Umbenennen</button>
+    <button type="button" class="danger" id="delpagebtn">Seite löschen</button>
+  </div>
+  <div class="stand" id="stand"></div>
+</div>
+
+<div class="panel" id="newpage" hidden>
+  <p class="hint">Neue Seite, z. B. für ein Meeting. Sie bekommt Termine und eine Themenliste zum Abhaken und erscheint auch am Display.</p>
+  <input id="np-name" placeholder="Name, z. B. Marius" maxlength="24" autocomplete="off">
+  <button class="save" id="np-save" type="button">Seite anlegen</button>
+</div>
 
 <div class="panel" id="settings" hidden>
   <p class="hint" id="s-info"></p>
@@ -80,35 +136,6 @@
   <button class="save" id="s-save" type="button">Speichern und verbinden</button>
 </div>
 
-<div id="main">
-  <div class="warn" id="offline" hidden>Das Display ist gerade offline. Änderungen sind erst wieder möglich, wenn es verbunden ist.</div>
-
-  <form id="f">
-    <input id="title" placeholder="Neue Aufgabe…" maxlength="80" autocomplete="off" required>
-    <div class="prios">
-      <label class="l0"><input type="radio" name="p" value="0"><span>Niedrig</span></label>
-      <label class="l1"><input type="radio" name="p" value="1" checked><span>Mittel</span></label>
-      <label class="l2"><input type="radio" name="p" value="2"><span>Hoch</span></label>
-    </div>
-    <select id="rep">
-      <option value="0">Einmalig</option>
-      <option value="1">Täglich</option>
-      <option value="2">Wöchentlich</option>
-      <option value="3">Monatlich</option>
-    </select>
-    <select id="wd" hidden>
-      <option value="1">Montag</option><option value="2">Dienstag</option><option value="3">Mittwoch</option>
-      <option value="4">Donnerstag</option><option value="5">Freitag</option><option value="6">Samstag</option><option value="0">Sonntag</option>
-    </select>
-    <input id="md" type="number" min="1" max="31" value="1" placeholder="Tag im Monat" hidden>
-    <button class="add" id="addbtn">Hinzufügen</button>
-  </form>
-
-  <h2>Offen</h2><div id="open"><div class="empty">Lade…</div></div>
-  <h2>Erledigt / nicht fällig</h2><div id="rest"></div>
-  <div class="stand" id="stand"></div>
-</div>
-
 <script>
 const P=['Niedrig','Mittel','Hoch'], PC=['var(--p0)','var(--p1)','var(--p2)'];
 const WD=['So','Mo','Di','Mi','Do','Fr','Sa'];
@@ -116,10 +143,11 @@ const KEY='erinnerung-mqtt';
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-let fromLink=false, cfg=null, client=null, displayOnline=false, armedDelete=null, last=null;
+let fromLink=false, cfg=null, client=null, displayOnline=false, armed=null, last=null;
+let tab='main', kind=0;           // tab: 'main' | Seiten-ID (Zahl) | 'new' | 'set'
 const DEFAULT_HOST='qf101aad.ala.eu-central-1.emqxsl.com';
 
-// Login-Daten merken: localStorage + Cookie als Reserve (10 Jahre gültig)
+// ---------- Login-Daten merken: localStorage + Cookie als Reserve ----------
 function loadCfg(){
   try{ const v=localStorage.getItem(KEY); if(v) return JSON.parse(v); }catch(e){}
   try{
@@ -138,7 +166,7 @@ function saveCfg(c){
 }
 cfg=loadCfg();
 
-// Login-Link: https://.../erinnerung/#u=BENUTZER&p=PASSWORT
+// Login-Link: https://.../erinnerung/#p=PASSWORT&u=BENUTZER
 // Die Daten hinter # werden nie an GitHub geschickt, sie bleiben auf dem Handy.
 (function(){
   const h=location.hash.replace(/^#/,''); if(!h) return;
@@ -147,21 +175,19 @@ cfg=loadCfg();
     cfg={host:q.get('h')||DEFAULT_HOST, user:q.get('u'), pass:q.get('p'), topic:q.get('t')||'erinnerung'};
     saveCfg(cfg);
     fromLink=true;
-    // Vom Home-Bildschirm gestartet: Zugangsdaten aus der sichtbaren Adresse entfernen.
-    // Das Symbol selbst behält den vollständigen Link.
     const standalone=navigator.standalone||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
     if(standalone){ try{ history.replaceState(null,'',location.pathname); }catch(e){} }
   }
 })();
 
-
+// ---------- Verbindung ----------
 function alertBox(t){ const w=$('offline'); w.textContent=t; w.hidden=false; setTimeout(()=>{w.textContent='Das Display ist gerade offline. Änderungen sind erst wieder möglich, wenn es verbunden ist.'; updateButtons();},6000); }
 function setConn(cls,txt){ $('dot').className='dot '+cls; $('conn').textContent=txt; }
 function canSend(){ return client && client.connected && displayOnline; }
 function updateButtons(){
-  $('addbtn').disabled=!canSend();
+  $('addbtn').disabled=!canSend(); $('np-save').disabled=!canSend();
   $('offline').hidden=!(client && client.connected && !displayOnline);
-  if(last) render(last);
+  render();
 }
 
 function connect(){
@@ -184,7 +210,7 @@ function connect(){
   client.on('message',(topic,msg)=>{
     const s=msg.toString();
     if(topic===t+'/status'){ displayOnline=(s==='online'); updateButtons(); return; }
-    try{ render(JSON.parse(s)); }catch(e){}
+    try{ last=JSON.parse(s); buildTabs(); render(); }catch(e){}
   });
 }
 
@@ -193,56 +219,99 @@ function send(cmd){
   client.publish((cfg.topic||'erinnerung')+'/cmd',JSON.stringify(cmd),{qos:1});
 }
 
+// ---------- Hilfsfunktionen ----------
+const pages=()=> (last&&last.pages)||[];
+const pageName=id=>{ const p=pages().find(p=>p.id===id); return p?p.name:''; };
+const dayStart=d=>{ const x=new Date(d); x.setHours(0,0,0,0); return x; };
+function whenLabel(sec){
+  const d=new Date(sec*1000), diff=Math.round((dayStart(d)-dayStart(new Date()))/864e5);
+  const hm=d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+  const day=diff===0?'heute':diff===1?'morgen':diff===-1?'gestern':
+    WD[d.getDay()]+' '+String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+'.';
+  return day+' · '+hm+' Uhr';
+}
 function repLabel(t){
   return ['Einmalig','Täglich','Wöchentlich ('+WD[t.day]+')','Monatlich ('+t.day+'.)'][t.repeat];
 }
-function row(t){
-  const late=t.due&&t.late>0?` · <span class="late">${t.late==1?'seit gestern':'seit '+t.late+' Tagen'}</span>`:'';
+
+// ---------- Darstellung ----------
+function row(t,opts){
   const dis=canSend()?'':'disabled';
-  return `<div class="task ${t.due?'':'done'}">
+  let sub;
+  if(t.kind===1){
+    const past=t.when*1000<Date.now();
+    sub=`<span class="appt">Termin ${whenLabel(t.when)}</span>`+(past?' · <span class="late">vorbei</span>':'');
+    if(opts&&opts.showPage&&t.page) sub=esc(pageName(t.page))+' · '+sub;
+  } else if(t.kind===2){
+    sub=P[t.prio]+' · Thema';
+  } else {
+    const late=t.due&&t.late>0?` · <span class="late">${t.late==1?'seit gestern':'seit '+t.late+' Tagen'}</span>`:'';
+    sub=P[t.prio]+' · '+repLabel(t)+late;
+  }
+  const showOk=t.kind!==0||t.due;
+  const okLabel=t.kind===2?'Besprochen':'Erledigt';
+  return `<div class="task ${t.kind===0&&!t.due?'done':''}">
     <div class="bar" style="background:${PC[t.prio]}"></div>
-    <div class="info"><div class="t">${esc(t.title)}</div>
-      <div class="s">${P[t.prio]} · ${repLabel(t)}${late}</div></div>
+    <div class="info"><div class="t">${esc(t.title)}</div><div class="s">${sub}</div></div>
     <div class="btns">
-      ${t.due?`<button class="ok" data-a="done" data-id="${t.id}" ${dis} aria-label="Erledigt">✓</button>`:''}
+      ${showOk?`<button class="ok" data-a="done" data-id="${t.id}" ${dis} aria-label="${okLabel}">✓</button>`:''}
       <button class="del" data-a="delete" data-id="${t.id}" ${dis} aria-label="Löschen">✕</button>
     </div></div>`;
 }
-function render(state){
-  last=state;
-  const list=(state.tasks||[]).slice().sort((a,b)=>b.prio-a.prio||b.late-a.late);
-  const open=list.filter(t=>t.due), rest=list.filter(t=>!t.due);
-  $('open').innerHTML=open.length?open.map(row).join(''):'<div class="empty">Alles erledigt 🎉</div>';
-  $('rest').innerHTML=rest.length?rest.map(row).join(''):'<div class="empty">–</div>';
-  $('stand').textContent=state.ts?'Stand vom Display: '+state.ts:'';
+function section(title,list,empty,opts){
+  return `<h2>${title}</h2>`+(list.length?list.map(t=>row(t,opts)).join(''):`<div class="empty">${empty}</div>`);
+}
+function render(){
+  const lists=$('lists');
+  if(!last){ lists.innerHTML='<h2>Offen</h2><div class="empty">Lade…</div>'; return; }
+  const all=last.tasks||[];
+  const byWhen=(a,b)=>a.when-b.when, byPrio=(a,b)=>b.prio-a.prio||b.late-a.late;
+  let html='';
+  if(tab==='main'){
+    const appts=all.filter(t=>t.kind===1).sort(byWhen);
+    const tasks=all.filter(t=>t.kind===0&&t.page===0).sort(byPrio);
+    html+=section('Termine',appts,'Keine Termine',{showPage:true});
+    html+=section('Offen',tasks.filter(t=>t.due),'Alles erledigt 🎉');
+    html+=section('Erledigt / nicht fällig',tasks.filter(t=>!t.due),'–');
+  } else if(typeof tab==='number'){
+    const mine=all.filter(t=>t.page===tab);
+    html+=section('Termine',mine.filter(t=>t.kind===1).sort(byWhen),'Keine Termine');
+    html+=section('Themen',mine.filter(t=>t.kind!==1).sort(byPrio),'Keine offenen Themen');
+  }
+  lists.innerHTML=html;
+  $('stand').textContent=last.ts?'Stand vom Display: '+last.ts:'';
+  $('renamebtn').disabled=$('delpagebtn').disabled=!canSend();
 }
 
-document.addEventListener('click',e=>{
-  const b=e.target.closest('button[data-a]'); if(!b) return;
-  const id=+b.dataset.id;
-  if(b.dataset.a==='done'){ send({a:'done',id}); return; }
-  // Löschen: zweimal tippen
-  if(armedDelete===id){ send({a:'delete',id}); armedDelete=null; return; }
-  armedDelete=id; b.classList.add('sure'); b.textContent='Löschen?';
-  setTimeout(()=>{ if(armedDelete===id){ armedDelete=null; if(last) render(last); } },3000);
-});
-
-$('rep').onchange=()=>{ const r=$('rep').value; $('wd').hidden=r!='2'; $('md').hidden=r!='3'; };
-$('f').onsubmit=e=>{
-  e.preventDefault();
-  const r=+$('rep').value;
-  const title=$('title').value.trim(); if(!title) return;
-  send({a:'add',title,prio:+document.querySelector('input[name=p]:checked').value,
-        repeat:r, day:r==2?+$('wd').value:r==3?+$('md').value:1});
-  $('title').value='';
-};
-
+// ---------- Reiter ----------
+function buildTabs(){
+  if(typeof tab==='number'&&!pages().some(p=>p.id===tab)) tab='main';
+  const items=[['main','Aufgaben'],...pages().map(p=>[p.id,p.name]),['new','+ Seite'],['set','Einstellungen']];
+  $('tabs').innerHTML=items.map(([id,name])=>
+    `<button type="button" role="tab" data-tab="${id}" aria-selected="${id===tab}">${esc(name)}</button>`).join('');
+}
+function setKind(k){
+  kind=k;
+  $('kindseg').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.k===k)));
+  const appt=k===1;
+  $('apptopts').hidden=!appt;
+  $('taskopts').hidden=appt||typeof tab==='number';
+  $('title').placeholder=appt?'Neuer Termin…':typeof tab==='number'?'Neues Thema…':'Neue Aufgabe…';
+  if(appt&&!$('adate').value){
+    const d=new Date(); d.setHours(d.getHours()+1,0,0,0);
+    $('adate').value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    $('atime').value=String(d.getHours()).padStart(2,'0')+':00';
+  }
+}
 function showTab(t){
-  const set=(t==='set');
-  $('main').hidden=set; $('settings').hidden=!set;
-  $('tab-main').setAttribute('aria-selected',String(!set));
-  $('tab-set').setAttribute('aria-selected',String(set));
-  if(set){
+  tab=t; armed=null;
+  const isList=(t==='main'||typeof t==='number');
+  $('main').hidden=!isList; $('newpage').hidden=t!=='new'; $('settings').hidden=t!=='set';
+  $('ptitle').hidden=typeof t!=='number'; $('ptitle').textContent=typeof t==='number'?pageName(t):'';
+  $('pagetools').hidden=typeof t!=='number';
+  $('kindseg').querySelector('[data-k="0"]').textContent=typeof t==='number'?'Thema':'Aufgabe';
+  if(isList) setKind(0);
+  if(t==='set'){
     $('s-host').value=(cfg&&cfg.host)||DEFAULT_HOST;
     $('s-user').value=(cfg&&cfg.user)||'';
     $('s-pass').value='';
@@ -250,19 +319,74 @@ function showTab(t){
     $('s-topic').value=(cfg&&cfg.topic)||'erinnerung';
     $('s-info').textContent=(cfg&&cfg.user)?('Angemeldet als '+cfg.user+'.'):'Noch nicht eingerichtet.';
   }
+  buildTabs(); render();
 }
-$('tab-main').onclick=()=>showTab('main');
-$('tab-set').onclick=()=>showTab('set');
+$('tabs').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-tab]'); if(!b) return;
+  const v=b.dataset.tab; showTab(/^\d+$/.test(v)?+v:v);
+});
+$('kindseg').addEventListener('click',e=>{ const b=e.target.closest('button[data-k]'); if(b) setKind(+b.dataset.k); });
+
+// ---------- Aktionen ----------
+function arm(btn,key,label,action){
+  if(armed===key){ armed=null; action(); return; }
+  armed=key; btn.classList.add('sure'); btn.textContent=label;
+  setTimeout(()=>{ if(armed===key){ armed=null; buildTabs(); render(); btn.classList.remove('sure'); btn.textContent=btn.dataset.orig||btn.textContent; } },3000);
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('button[data-a]'); if(!b) return;
+  const id=+b.dataset.id;
+  if(b.dataset.a==='done'){ send({a:'done',id}); return; }
+  arm(b,'del'+id,'Löschen?',()=>send({a:'delete',id}));
+});
+
+$('rep').onchange=()=>{ const r=$('rep').value; $('wd').hidden=r!='2'; $('md').hidden=r!='3'; };
+$('f').onsubmit=e=>{
+  e.preventDefault();
+  const title=$('title').value.trim(); if(!title) return;
+  const prio=+document.querySelector('input[name=p]:checked').value;
+  const page=typeof tab==='number'?tab:0;
+  if(kind===1){
+    if(!$('adate').value||!$('atime').value){ alertBox('Bitte Datum und Uhrzeit wählen.'); return; }
+    const when=Math.round(new Date($('adate').value+'T'+$('atime').value).getTime()/1000);
+    send({a:'add',page,kind:1,title,prio,when});
+  } else if(page){
+    send({a:'add',page,kind:2,title,prio});
+  } else {
+    const r=+$('rep').value;
+    send({a:'add',page:0,kind:0,title,prio,repeat:r,day:r==2?+$('wd').value:r==3?+$('md').value:1});
+  }
+  $('title').value='';
+};
+
+$('np-save').onclick=()=>{
+  const name=$('np-name').value.trim(); if(!name) return;
+  if(pages().length>=8){ alertBox('Maximal 8 Seiten möglich.'); return; }
+  send({a:'addPage',name}); $('np-name').value='';
+  // auf die neue Seite wechseln, sobald das Display sie bestätigt
+  const before=pages().map(p=>p.id);
+  const iv=setInterval(()=>{ const n=pages().find(p=>!before.includes(p.id)); if(n){ clearInterval(iv); showTab(n.id); } },300);
+  setTimeout(()=>clearInterval(iv),8000);
+};
+$('renamebtn').onclick=()=>{
+  if(typeof tab!=='number') return;
+  const name=(prompt('Neuer Name für die Seite:',pageName(tab))||'').trim();
+  if(name) send({a:'renamePage',id:tab,name});
+};
+$('delpagebtn').onclick=()=>{
+  if(typeof tab!=='number') return;
+  const b=$('delpagebtn'); b.dataset.orig='Seite löschen';
+  arm(b,'page'+tab,'Wirklich löschen?',()=>{ send({a:'delPage',id:tab}); showTab('main'); });
+};
+
 $('s-save').onclick=()=>{
   cfg={host:$('s-host').value.trim().replace(/^\w+:\/\//,'').replace(/[:\/].*$/,''),
        user:$('s-user').value.trim(), pass:$('s-pass').value||(cfg&&cfg.pass)||'', topic:$('s-topic').value.trim()||'erinnerung'};
-  if(!saveCfg(cfg)){
-    alertBox('Login konnte nicht gespeichert werden. Ist Safari im privaten Modus?');
-  }
+  if(!saveCfg(cfg)) alertBox('Login konnte nicht gespeichert werden. Ist Safari im privaten Modus?');
   showTab('main'); connect();
 };
 
-connect(); updateButtons();
+showTab('main'); connect(); updateButtons();
 </script>
 </body>
 </html>
