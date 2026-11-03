@@ -107,7 +107,7 @@ const KEY='erinnerung-mqtt';
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-let cfg=null, client=null, displayOnline=false, armedDelete=null, last=null;
+let fromLink=false, cfg=null, client=null, displayOnline=false, armedDelete=null, last=null;
 const DEFAULT_HOST='qf101aad.ala.eu-central-1.emqxsl.com';
 
 // Login-Daten merken: localStorage + Cookie als Reserve (10 Jahre gültig)
@@ -137,8 +137,15 @@ cfg=loadCfg();
   if(q.get('u')&&q.get('p')){
     cfg={host:q.get('h')||DEFAULT_HOST, user:q.get('u'), pass:q.get('p'), topic:q.get('t')||'erinnerung'};
     saveCfg(cfg);
+    fromLink=true;
+    // Vom Home-Bildschirm gestartet: Zugangsdaten aus der sichtbaren Adresse entfernen.
+    // Das Symbol selbst behält den vollständigen Link.
+    const standalone=navigator.standalone||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
+    if(standalone){ try{ history.replaceState(null,'',location.pathname); }catch(e){} }
   }
 })();
+// Mit Login-Link: Einstellungen komplett ausblenden
+if(fromLink) $('gear').hidden=true;
 
 function alertBox(t){ const w=$('offline'); w.textContent=t; w.hidden=false; setTimeout(()=>{w.textContent='Das Display ist gerade offline. Änderungen sind erst wieder möglich, wenn es verbunden ist.'; updateButtons();},6000); }
 function setConn(cls,txt){ $('dot').className='dot '+cls; $('conn').textContent=txt; }
@@ -225,11 +232,11 @@ $('f').onsubmit=e=>{
 $('gear').onclick=()=>{
   const s=$('settings'); s.hidden=!s.hidden;
   if(!s.hidden){ $('s-host').value=DEFAULT_HOST; }
-  if(!s.hidden&&cfg){ $('s-host').value=cfg.host||''; $('s-user').value=cfg.user||''; $('s-pass').value=cfg.pass||''; $('s-topic').value=cfg.topic||'erinnerung'; }
+  if(!s.hidden&&cfg){ $('s-host').value=cfg.host||''; $('s-user').value=cfg.user||''; $('s-pass').value=''; $('s-pass').placeholder=cfg.pass?'gespeichert – nur zum Ändern ausfüllen':''; $('s-topic').value=cfg.topic||'erinnerung'; }
 };
 $('s-save').onclick=()=>{
   cfg={host:$('s-host').value.trim().replace(/^\w+:\/\//,'').replace(/[:\/].*$/,''),
-       user:$('s-user').value.trim(), pass:$('s-pass').value, topic:$('s-topic').value.trim()||'erinnerung'};
+       user:$('s-user').value.trim(), pass:$('s-pass').value||(cfg&&cfg.pass)||'', topic:$('s-topic').value.trim()||'erinnerung'};
   if(!saveCfg(cfg)){
     alertBox('Login konnte nicht gespeichert werden. Ist Safari im privaten Modus?');
   }
