@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Erinnerungen">
+<meta name="theme-color" content="#12141a">
+<title>Erinnerungen</title>
+<script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
+<style>
+  :root{--bg:#12141a;--card:#282d3a;--head:#20242e;--txt:#ebeef5;--sub:#969eaf;
+        --p0:#2eaa55;--p1:#f09628;--p2:#e13737;--late:#ff6e6e;color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:16px -apple-system,system-ui,sans-serif;
+       padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 40px max(16px,env(safe-area-inset-left))}
+  header{display:flex;align-items:center;gap:10px;margin:4px 0 14px}
+  h1{font-size:22px;margin:0;flex:1}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--sub)}
+  .dot.on{background:var(--p0)} .dot.off{background:var(--p2)}
+  #conn{font-size:13px;color:var(--sub)}
+  .gear{width:auto;background:var(--card);color:var(--sub);padding:8px 12px}
+  h2{font-size:14px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin:24px 0 8px}
+  form,.panel{background:var(--head);border-radius:14px;padding:14px;display:grid;gap:10px}
+  label.f{font-size:13px;color:var(--sub);display:grid;gap:4px}
+  input,select,button{font:inherit;border-radius:10px;border:0;padding:12px;width:100%}
+  input,select{background:var(--card);color:var(--txt)}
+  button{cursor:pointer}
+  button:disabled{opacity:.4}
+  .prios{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .prios label{text-align:center;padding:10px;border-radius:10px;background:var(--card);cursor:pointer;font-weight:600;font-size:14px}
+  .prios input{display:none}
+  .prios label:has(input:checked){color:#fff}
+  .prios label:has(input:checked).l0{background:var(--p0)}
+  .prios label:has(input:checked).l1{background:var(--p1)}
+  .prios label:has(input:checked).l2{background:var(--p2)}
+  .add,.save{background:var(--p0);color:#fff;font-weight:700}
+  .task{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:12px;margin-bottom:8px;overflow:hidden}
+  .bar{width:8px;align-self:stretch}
+  .info{flex:1;padding:10px 0;min-width:0}
+  .t{font-weight:600;overflow-wrap:anywhere}
+  .s{font-size:13px;color:var(--sub);margin-top:2px}
+  .s .late{color:var(--late)}
+  .btns{display:flex;gap:6px;padding-right:8px}
+  .btns button{width:auto;padding:10px 12px;font-size:14px;font-weight:600}
+  .ok{background:var(--p0);color:#fff}
+  .del{background:#3a3f4d;color:var(--sub)}
+  .del.sure{background:var(--p2);color:#fff}
+  .done .t{color:var(--sub)}
+  .empty{color:var(--sub);padding:8px 2px}
+  .warn{background:#3a2326;color:var(--late);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:12px}
+  .stand{font-size:12px;color:var(--sub);margin-top:16px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Erinnerungen</h1>
+  <span class="dot" id="dot"></span><span id="conn">…</span>
+  <button class="gear" id="gear" type="button" aria-label="Einstellungen">⚙︎</button>
+</header>
+
+<div class="panel" id="settings" hidden>
+  <label class="f">Broker-Adresse (EMQX)
+    <input id="s-host" placeholder="xxxxxxxx.ala.eu-central-1.emqxsl.com" autocapitalize="off" autocorrect="off"></label>
+  <label class="f">Benutzer
+    <input id="s-user" autocapitalize="off" autocorrect="off"></label>
+  <label class="f">Passwort
+    <input id="s-pass" type="password"></label>
+  <label class="f">Topic (wie im Display)
+    <input id="s-topic" value="erinnerung" autocapitalize="off" autocorrect="off"></label>
+  <button class="save" id="s-save" type="button">Speichern und verbinden</button>
+</div>
+
+<div id="main">
+  <div class="warn" id="offline" hidden>Das Display ist gerade offline. Änderungen sind erst wieder möglich, wenn es verbunden ist.</div>
+
+  <form id="f">
+    <input id="title" placeholder="Neue Aufgabe…" maxlength="80" autocomplete="off" required>
+    <div class="prios">
+      <label class="l0"><input type="radio" name="p" value="0"><span>Niedrig</span></label>
+      <label class="l1"><input type="radio" name="p" value="1" checked><span>Mittel</span></label>
+      <label class="l2"><input type="radio" name="p" value="2"><span>Hoch</span></label>
+    </div>
+    <select id="rep">
+      <option value="0">Einmalig</option>
+      <option value="1">Täglich</option>
+      <option value="2">Wöchentlich</option>
+      <option value="3">Monatlich</option>
+    </select>
+    <select id="wd" hidden>
+      <option value="1">Montag</option><option value="2">Dienstag</option><option value="3">Mittwoch</option>
+      <option value="4">Donnerstag</option><option value="5">Freitag</option><option value="6">Samstag</option><option value="0">Sonntag</option>
+    </select>
+    <input id="md" type="number" min="1" max="31" value="1" placeholder="Tag im Monat" hidden>
+    <button class="add" id="addbtn">Hinzufügen</button>
+  </form>
+
+  <h2>Offen</h2><div id="open"><div class="empty">Lade…</div></div>
+  <h2>Erledigt / nicht fällig</h2><div id="rest"></div>
+  <div class="stand" id="stand"></div>
+</div>
+
+<script>
+const P=['Niedrig','Mittel','Hoch'], PC=['var(--p0)','var(--p1)','var(--p2)'];
+const WD=['So','Mo','Di','Mi','Do','Fr','Sa'];
+const KEY='erinnerung-mqtt';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let cfg=null, client=null, displayOnline=false, armedDelete=null, last=null;
+try{ cfg=JSON.parse(localStorage.getItem(KEY)); }catch(e){}
+
+function setConn(cls,txt){ $('dot').className='dot '+cls; $('conn').textContent=txt; }
+function canSend(){ return client && client.connected && displayOnline; }
+function updateButtons(){
+  $('addbtn').disabled=!canSend();
+  $('offline').hidden=!(client && client.connected && !displayOnline);
+  if(last) render(last);
+}
+
+function connect(){
+  if(client){ try{client.end(true);}catch(e){} client=null; }
+  if(!cfg||!cfg.host){ $('settings').hidden=false; setConn('','nicht eingerichtet'); return; }
+  setConn('','verbinde…');
+  client=mqtt.connect('wss://'+cfg.host.trim()+':8084/mqtt',{
+    username:cfg.user, password:cfg.pass, protocolVersion:4,
+    clientId:'erinnerung-web-'+Math.random().toString(16).slice(2,10),
+    reconnectPeriod:4000, connectTimeout:10000, clean:true
+  });
+  const t=cfg.topic||'erinnerung';
+  client.on('connect',()=>{
+    setConn('on','verbunden');
+    client.subscribe([t+'/state',t+'/status'],{qos:1});
+    updateButtons();
+  });
+  client.on('close',()=>{ setConn('off','getrennt'); updateButtons(); });
+  client.on('error',e=>{ setConn('off', /auth|Not authorized/i.test(e.message)?'Login falsch':'Fehler'); });
+  client.on('message',(topic,msg)=>{
+    const s=msg.toString();
+    if(topic===t+'/status'){ displayOnline=(s==='online'); updateButtons(); return; }
+    try{ render(JSON.parse(s)); }catch(e){}
+  });
+}
+
+function send(cmd){
+  if(!canSend()) return;
+  client.publish((cfg.topic||'erinnerung')+'/cmd',JSON.stringify(cmd),{qos:1});
+}
+
+function repLabel(t){
+  return ['Einmalig','Täglich','Wöchentlich ('+WD[t.day]+')','Monatlich ('+t.day+'.)'][t.repeat];
+}
+function row(t){
+  const late=t.due&&t.late>0?` · <span class="late">${t.late==1?'seit gestern':'seit '+t.late+' Tagen'}</span>`:'';
+  const dis=canSend()?'':'disabled';
+  return `<div class="task ${t.due?'':'done'}">
+    <div class="bar" style="background:${PC[t.prio]}"></div>
+    <div class="info"><div class="t">${esc(t.title)}</div>
+      <div class="s">${P[t.prio]} · ${repLabel(t)}${late}</div></div>
+    <div class="btns">
+      ${t.due?`<button class="ok" data-a="done" data-id="${t.id}" ${dis} aria-label="Erledigt">✓</button>`:''}
+      <button class="del" data-a="delete" data-id="${t.id}" ${dis} aria-label="Löschen">✕</button>
+    </div></div>`;
+}
+function render(state){
+  last=state;
+  const list=(state.tasks||[]).slice().sort((a,b)=>b.prio-a.prio||b.late-a.late);
+  const open=list.filter(t=>t.due), rest=list.filter(t=>!t.due);
+  $('open').innerHTML=open.length?open.map(row).join(''):'<div class="empty">Alles erledigt 🎉</div>';
+  $('rest').innerHTML=rest.length?rest.map(row).join(''):'<div class="empty">–</div>';
+  $('stand').textContent=state.ts?'Stand vom Display: '+state.ts:'';
+}
+
+document.addEventListener('click',e=>{
+  const b=e.target.closest('button[data-a]'); if(!b) return;
+  const id=+b.dataset.id;
+  if(b.dataset.a==='done'){ send({a:'done',id}); return; }
+  // Löschen: zweimal tippen
+  if(armedDelete===id){ send({a:'delete',id}); armedDelete=null; return; }
+  armedDelete=id; b.classList.add('sure'); b.textContent='Löschen?';
+  setTimeout(()=>{ if(armedDelete===id){ armedDelete=null; if(last) render(last); } },3000);
+});
+
+$('rep').onchange=()=>{ const r=$('rep').value; $('wd').hidden=r!='2'; $('md').hidden=r!='3'; };
+$('f').onsubmit=e=>{
+  e.preventDefault();
+  const r=+$('rep').value;
+  const title=$('title').value.trim(); if(!title) return;
+  send({a:'add',title,prio:+document.querySelector('input[name=p]:checked').value,
+        repeat:r, day:r==2?+$('wd').value:r==3?+$('md').value:1});
+  $('title').value='';
+};
+
+$('gear').onclick=()=>{
+  const s=$('settings'); s.hidden=!s.hidden;
+  if(!s.hidden&&cfg){ $('s-host').value=cfg.host||''; $('s-user').value=cfg.user||''; $('s-pass').value=cfg.pass||''; $('s-topic').value=cfg.topic||'erinnerung'; }
+};
+$('s-save').onclick=()=>{
+  cfg={host:$('s-host').value.trim().replace(/^\w+:\/\//,'').replace(/[:\/].*$/,''),
+       user:$('s-user').value.trim(), pass:$('s-pass').value, topic:$('s-topic').value.trim()||'erinnerung'};
+  try{ localStorage.setItem(KEY,JSON.stringify(cfg)); }catch(e){}
+  $('settings').hidden=true; connect();
+};
+
+connect(); updateButtons();
+</script>
+</body>
+</html>
