@@ -63,9 +63,9 @@
   <label class="f">Broker-Adresse (EMQX)
     <input id="s-host" placeholder="xxxxxxxx.ala.eu-central-1.emqxsl.com" autocapitalize="off" autocorrect="off"></label>
   <label class="f">Benutzer
-    <input id="s-user" autocapitalize="off" autocorrect="off"></label>
+    <input id="s-user" autocomplete="username" autocapitalize="off" autocorrect="off"></label>
   <label class="f">Passwort
-    <input id="s-pass" type="password"></label>
+    <input id="s-pass" type="password" autocomplete="current-password"></label>
   <label class="f">Topic (wie im Display)
     <input id="s-topic" value="erinnerung" autocapitalize="off" autocorrect="off"></label>
   <button class="save" id="s-save" type="button">Speichern und verbinden</button>
@@ -108,8 +108,39 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 let cfg=null, client=null, displayOnline=false, armedDelete=null, last=null;
-try{ cfg=JSON.parse(localStorage.getItem(KEY)); }catch(e){}
+const DEFAULT_HOST='qf101aad.ala.eu-central-1.emqxsl.com';
 
+// Login-Daten merken: localStorage + Cookie als Reserve (10 Jahre gültig)
+function loadCfg(){
+  try{ const v=localStorage.getItem(KEY); if(v) return JSON.parse(v); }catch(e){}
+  try{
+    const m=document.cookie.match(new RegExp('(?:^|; )'+KEY+'=([^;]*)'));
+    if(m) return JSON.parse(decodeURIComponent(m[1]));
+  }catch(e){}
+  return null;
+}
+function saveCfg(c){
+  let ok=false;
+  const v=JSON.stringify(c);
+  try{ localStorage.setItem(KEY,v); ok=localStorage.getItem(KEY)===v; }catch(e){}
+  try{ document.cookie=KEY+'='+encodeURIComponent(v)+'; max-age=315360000; path=/; secure; samesite=strict'; ok=ok||document.cookie.indexOf(KEY+'=')>=0; }catch(e){}
+  try{ navigator.storage&&navigator.storage.persist&&navigator.storage.persist(); }catch(e){}
+  return ok;
+}
+cfg=loadCfg();
+
+// Login-Link: https://.../erinnerung/#u=BENUTZER&p=PASSWORT
+// Die Daten hinter # werden nie an GitHub geschickt, sie bleiben auf dem Handy.
+(function(){
+  const h=location.hash.replace(/^#/,''); if(!h) return;
+  const q=new URLSearchParams(h);
+  if(q.get('u')&&q.get('p')){
+    cfg={host:q.get('h')||DEFAULT_HOST, user:q.get('u'), pass:q.get('p'), topic:q.get('t')||'erinnerung'};
+    saveCfg(cfg);
+  }
+})();
+
+function alertBox(t){ const w=$('offline'); w.textContent=t; w.hidden=false; setTimeout(()=>{w.textContent='Das Display ist gerade offline. Änderungen sind erst wieder möglich, wenn es verbunden ist.'; updateButtons();},6000); }
 function setConn(cls,txt){ $('dot').className='dot '+cls; $('conn').textContent=txt; }
 function canSend(){ return client && client.connected && displayOnline; }
 function updateButtons(){
@@ -120,7 +151,7 @@ function updateButtons(){
 
 function connect(){
   if(client){ try{client.end(true);}catch(e){} client=null; }
-  if(!cfg||!cfg.host){ $('settings').hidden=false; setConn('','nicht eingerichtet'); return; }
+  if(!cfg||!cfg.host){ $('settings').hidden=false; if(!$('s-host').value) $('s-host').value=DEFAULT_HOST; setConn('','nicht eingerichtet'); return; }
   setConn('','verbinde…');
   client=mqtt.connect('wss://'+cfg.host.trim()+':8084/mqtt',{
     username:cfg.user, password:cfg.pass, protocolVersion:4,
@@ -193,12 +224,15 @@ $('f').onsubmit=e=>{
 
 $('gear').onclick=()=>{
   const s=$('settings'); s.hidden=!s.hidden;
+  if(!s.hidden){ $('s-host').value=DEFAULT_HOST; }
   if(!s.hidden&&cfg){ $('s-host').value=cfg.host||''; $('s-user').value=cfg.user||''; $('s-pass').value=cfg.pass||''; $('s-topic').value=cfg.topic||'erinnerung'; }
 };
 $('s-save').onclick=()=>{
   cfg={host:$('s-host').value.trim().replace(/^\w+:\/\//,'').replace(/[:\/].*$/,''),
        user:$('s-user').value.trim(), pass:$('s-pass').value, topic:$('s-topic').value.trim()||'erinnerung'};
-  try{ localStorage.setItem(KEY,JSON.stringify(cfg)); }catch(e){}
+  if(!saveCfg(cfg)){
+    alertBox('Login konnte nicht gespeichert werden. Ist Safari im privaten Modus?');
+  }
   $('settings').hidden=true; connect();
 };
 
