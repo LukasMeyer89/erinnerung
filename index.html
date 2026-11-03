@@ -12,6 +12,7 @@
   :root{--bg:#12141a;--card:#282d3a;--head:#20242e;--txt:#ebeef5;--sub:#969eaf;
         --p0:#2eaa55;--p1:#f09628;--p2:#e13737;--late:#ff6e6e;color-scheme:dark}
   *{box-sizing:border-box}
+  [hidden]{display:none!important}
   body{margin:0;background:var(--bg);color:var(--txt);font:16px -apple-system,system-ui,sans-serif;
        padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 40px max(16px,env(safe-area-inset-left))}
   header{display:flex;align-items:center;gap:10px;margin:4px 0 14px}
@@ -19,7 +20,6 @@
   .dot{width:10px;height:10px;border-radius:50%;background:var(--sub)}
   .dot.on{background:var(--p0)} .dot.off{background:var(--p2)}
   #conn{font-size:13px;color:var(--sub)}
-  .gear{width:auto;background:var(--card);color:var(--sub);padding:8px 12px}
   h2{font-size:14px;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;margin:24px 0 8px}
   form,.panel{background:var(--head);border-radius:14px;padding:14px;display:grid;gap:10px}
   label.f{font-size:13px;color:var(--sub);display:grid;gap:4px}
@@ -50,16 +50,25 @@
   .empty{color:var(--sub);padding:8px 2px}
   .warn{background:#3a2326;color:var(--late);border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:12px}
   .stand{font-size:12px;color:var(--sub);margin-top:16px}
+  .tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--head);border-radius:12px;padding:4px;margin-bottom:14px}
+  .tabs button{background:transparent;color:var(--sub);font-weight:600;padding:10px}
+  .tabs button[aria-selected="true"]{background:var(--card);color:var(--txt)}
+  .hint{font-size:13px;color:var(--sub);margin:0}
 </style>
 </head>
 <body>
 <header>
   <h1>Erinnerungen</h1>
   <span class="dot" id="dot"></span><span id="conn">…</span>
-  <button class="gear" id="gear" type="button" aria-label="Einstellungen">⚙︎</button>
 </header>
 
+<nav class="tabs" role="tablist">
+  <button type="button" id="tab-main" role="tab" aria-selected="true">Aufgaben</button>
+  <button type="button" id="tab-set" role="tab" aria-selected="false">Einstellungen</button>
+</nav>
+
 <div class="panel" id="settings" hidden>
+  <p class="hint" id="s-info"></p>
   <label class="f">Broker-Adresse (EMQX)
     <input id="s-host" placeholder="xxxxxxxx.ala.eu-central-1.emqxsl.com" autocapitalize="off" autocorrect="off"></label>
   <label class="f">Benutzer
@@ -144,8 +153,7 @@ cfg=loadCfg();
     if(standalone){ try{ history.replaceState(null,'',location.pathname); }catch(e){} }
   }
 })();
-// Mit Login-Link: Einstellungen komplett ausblenden
-if(fromLink) $('gear').hidden=true;
+
 
 function alertBox(t){ const w=$('offline'); w.textContent=t; w.hidden=false; setTimeout(()=>{w.textContent='Das Display ist gerade offline. Änderungen sind erst wieder möglich, wenn es verbunden ist.'; updateButtons();},6000); }
 function setConn(cls,txt){ $('dot').className='dot '+cls; $('conn').textContent=txt; }
@@ -158,7 +166,7 @@ function updateButtons(){
 
 function connect(){
   if(client){ try{client.end(true);}catch(e){} client=null; }
-  if(!cfg||!cfg.host){ $('settings').hidden=false; if(!$('s-host').value) $('s-host').value=DEFAULT_HOST; setConn('','nicht eingerichtet'); return; }
+  if(!cfg||!cfg.host){ setConn('','nicht eingerichtet'); showTab('set'); return; }
   setConn('','verbinde…');
   client=mqtt.connect('wss://'+cfg.host.trim()+':8084/mqtt',{
     username:cfg.user, password:cfg.pass, protocolVersion:4,
@@ -229,18 +237,29 @@ $('f').onsubmit=e=>{
   $('title').value='';
 };
 
-$('gear').onclick=()=>{
-  const s=$('settings'); s.hidden=!s.hidden;
-  if(!s.hidden){ $('s-host').value=DEFAULT_HOST; }
-  if(!s.hidden&&cfg){ $('s-host').value=cfg.host||''; $('s-user').value=cfg.user||''; $('s-pass').value=''; $('s-pass').placeholder=cfg.pass?'gespeichert – nur zum Ändern ausfüllen':''; $('s-topic').value=cfg.topic||'erinnerung'; }
-};
+function showTab(t){
+  const set=(t==='set');
+  $('main').hidden=set; $('settings').hidden=!set;
+  $('tab-main').setAttribute('aria-selected',String(!set));
+  $('tab-set').setAttribute('aria-selected',String(set));
+  if(set){
+    $('s-host').value=(cfg&&cfg.host)||DEFAULT_HOST;
+    $('s-user').value=(cfg&&cfg.user)||'';
+    $('s-pass').value='';
+    $('s-pass').placeholder=(cfg&&cfg.pass)?'gespeichert – nur zum Ändern ausfüllen':'';
+    $('s-topic').value=(cfg&&cfg.topic)||'erinnerung';
+    $('s-info').textContent=(cfg&&cfg.user)?('Angemeldet als '+cfg.user+'.'):'Noch nicht eingerichtet.';
+  }
+}
+$('tab-main').onclick=()=>showTab('main');
+$('tab-set').onclick=()=>showTab('set');
 $('s-save').onclick=()=>{
   cfg={host:$('s-host').value.trim().replace(/^\w+:\/\//,'').replace(/[:\/].*$/,''),
        user:$('s-user').value.trim(), pass:$('s-pass').value||(cfg&&cfg.pass)||'', topic:$('s-topic').value.trim()||'erinnerung'};
   if(!saveCfg(cfg)){
     alertBox('Login konnte nicht gespeichert werden. Ist Safari im privaten Modus?');
   }
-  $('settings').hidden=true; connect();
+  showTab('main'); connect();
 };
 
 connect(); updateButtons();
