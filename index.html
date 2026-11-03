@@ -94,6 +94,10 @@
       <label class="l1"><input type="radio" name="p" value="1" checked><span>Mittel</span></label>
       <label class="l2"><input type="radio" name="p" value="2"><span>Hoch</span></label>
     </div>
+    <div class="row2" id="apptopts" hidden>
+      <input id="adate" type="date" aria-label="Datum">
+      <input id="atime" type="time" aria-label="Uhrzeit">
+    </div>
     <div id="taskopts" class="opts">
       <select id="rep" aria-label="Wiederholung">
         <option value="0">Einmalig</option>
@@ -113,10 +117,6 @@
         <button type="button" data-d="0">So</button>
       </div>
       <select id="md" aria-label="Tag im Monat" hidden></select>
-    </div>
-    <div class="row2" id="apptopts" hidden>
-      <input id="adate" type="date" aria-label="Datum">
-      <input id="atime" type="time" aria-label="Uhrzeit">
     </div>
     <button class="add" id="addbtn">Hinzufügen</button>
   </form>
@@ -263,8 +263,8 @@ function row(t,opts){
   const dis=canSend()?'':'disabled';
   let sub;
   if(t.kind===1){
-    const past=t.when*1000<Date.now();
-    sub=`<span class="appt">Termin ${whenLabel(t.when)}</span>`+(past?' · <span class="late">vorbei</span>':'');
+    const w=t.next||t.when, past=w*1000<Date.now();
+    sub=`<span class="appt">Termin ${whenLabel(w)}</span>`+(t.repeat?' · '+repLabel(t):'')+(past?' · <span class="late">vorbei</span>':'');
     if(opts&&opts.showPage&&t.page) sub=esc(pageName(t.page))+' · '+sub;
   } else if(t.kind===2){
     sub=P[t.prio]+' · Thema';
@@ -272,7 +272,7 @@ function row(t,opts){
     const late=t.due&&t.late>0?` · <span class="late">${t.late==1?'seit gestern':'seit '+t.late+' Tagen'}</span>`:'';
     sub=P[t.prio]+' · '+repLabel(t)+late;
   }
-  const showOk=t.kind!==0||t.due;
+  const showOk=t.kind===2||t.due||(t.kind===1&&!t.repeat);   // wiederkehrende nur, wenn fällig
   const okLabel=t.kind===2?'Besprochen':'Erledigt';
   return `<div class="task ${t.kind===0&&!t.due?'done':''}">
     <div class="bar" style="background:${PC[t.prio]}"></div>
@@ -289,7 +289,7 @@ function render(){
   const lists=$('lists');
   if(!last){ lists.innerHTML='<h2>Offen</h2><div class="empty">Lade…</div>'; return; }
   const all=last.tasks||[];
-  const byWhen=(a,b)=>a.when-b.when, byPrio=(a,b)=>b.prio-a.prio||b.late-a.late;
+  const tw=t=>t.next||t.when, byWhen=(a,b)=>tw(a)-tw(b), byPrio=(a,b)=>b.prio-a.prio||b.late-a.late;
   let html='';
   if(tab==='main'){
     const appts=all.filter(t=>t.kind===1).sort(byWhen);
@@ -319,7 +319,8 @@ function setKind(k){
   $('kindseg').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.k===k)));
   const appt=k===1;
   $('apptopts').hidden=!appt;
-  $('taskopts').hidden=appt||typeof tab==='number';
+  $('taskopts').hidden=!appt&&typeof tab==='number';   // Themen haben keine Wiederholung
+  updateRep();
   $('title').placeholder=appt?'Neuer Termin…':typeof tab==='number'?'Neues Thema…':'Neue Aufgabe…';
   if(appt&&!$('adate').value){
     const d=new Date(); d.setHours(d.getHours()+1,0,0,0);
@@ -368,6 +369,7 @@ document.addEventListener('click',e=>{
 $('every').innerHTML=Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');
 $('md').innerHTML=Array.from({length:30},(_,i)=>`<option value="${i+1}">am ${i+1}.</option>`).join('')+'<option value="31">am Monatsende</option>';
 function updateRep(){
+  $('rep').options[0].textContent=kind===1?'Einmalig (nur dieser Termin)':'Einmalig';
   const r=+$('rep').value;
   $('everyrow').hidden=r===0; $('wdays').hidden=r!==2; $('md').hidden=r!==3;
   $('everyunit').textContent=['','Tage','Wochen','Monate'][r]||'';
@@ -376,10 +378,17 @@ function updateRep(){
   if(r===2) $('everyunit').textContent=N===1?'Woche (jede Woche)':'Wochen';
   if(r===3) $('everyunit').textContent=N===1?'Monat (jeden Monat)':'Monate';
   if(r===2&&!$('wdays').querySelector('[aria-pressed="true"]')){
-    const b=$('wdays').querySelector(`[data-d="${new Date().getDay()}"]`); if(b) b.setAttribute('aria-pressed','true');
+    const b=$('wdays').querySelector(`[data-d="${refDate().getDay()}"]`); if(b) b.setAttribute('aria-pressed','true');
   }
 }
+function refDate(){ return kind===1&&$('adate').value?new Date($('adate').value+'T12:00'):new Date(); }
 $('rep').onchange=updateRep; $('every').onchange=updateRep;
+$('adate').onchange=()=>{   // Wochentag und Monatstag an das Termindatum anpassen
+  const d=refDate();
+  $('wdays').querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.d===d.getDay())));
+  $('md').value=String(d.getDate()>30?31:d.getDate());
+  updateRep();
+};
 $('wdays').addEventListener('click',e=>{ const b=e.target.closest('button[data-d]'); if(!b) return;
   b.setAttribute('aria-pressed',String(b.getAttribute('aria-pressed')!=='true')); });
 $('md').value=String(new Date().getDate()>30?31:new Date().getDate());
@@ -392,7 +401,12 @@ $('f').onsubmit=e=>{
   if(kind===1){
     if(!$('adate').value||!$('atime').value){ alertBox('Bitte Datum und Uhrzeit wählen.'); return; }
     const when=Math.round(new Date($('adate').value+'T'+$('atime').value).getTime()/1000);
-    send({a:'add',page,kind:1,title,prio,when});
+    const r=+$('rep').value, every=+$('every').value||1;
+    let mask=0; $('wdays').querySelectorAll('[aria-pressed="true"]').forEach(b=>mask|=1<<+b.dataset.d);
+    if(r===2&&!mask){ alertBox('Bitte mindestens einen Wochentag wählen.'); return; }
+    const cmd={a:'add',page,kind:1,title,prio,when,repeat:r};
+    if(r){ cmd.every=every; if(r===2) cmd.mask=mask; if(r===3) cmd.day=+$('md').value; }
+    send(cmd);
   } else if(page){
     send({a:'add',page,kind:2,title,prio});
   } else {
