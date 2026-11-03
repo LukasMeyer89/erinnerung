@@ -42,6 +42,12 @@
   .prios label:has(input:checked).l1{background:var(--p1)}
   .prios label:has(input:checked).l2{background:var(--p2)}
   .row2{display:grid;grid-template-columns:3fr 2fr;gap:8px}
+  .opts{display:grid;gap:10px}
+  .everyrow{display:flex;align-items:center;gap:10px;color:var(--sub);font-size:15px}
+  .everyrow select{width:auto;flex:0 0 88px}
+  .wdays{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+  .wdays button{padding:10px 0;background:var(--card);color:var(--sub);font-weight:600;font-size:14px}
+  .wdays button[aria-pressed="true"]{background:var(--appt);color:#0b1020}
   .add,.save{background:var(--p0);color:#fff;font-weight:700}
   .task{display:flex;align-items:center;gap:10px;background:var(--card);border-radius:12px;margin-bottom:8px;overflow:hidden}
   .bar{width:8px;align-self:stretch}
@@ -88,18 +94,25 @@
       <label class="l1"><input type="radio" name="p" value="1" checked><span>Mittel</span></label>
       <label class="l2"><input type="radio" name="p" value="2"><span>Hoch</span></label>
     </div>
-    <div id="taskopts">
-      <select id="rep">
+    <div id="taskopts" class="opts">
+      <select id="rep" aria-label="Wiederholung">
         <option value="0">Einmalig</option>
         <option value="1">Täglich</option>
         <option value="2">Wöchentlich</option>
         <option value="3">Monatlich</option>
       </select>
-      <select id="wd" hidden style="margin-top:10px">
-        <option value="1">Montag</option><option value="2">Dienstag</option><option value="3">Mittwoch</option>
-        <option value="4">Donnerstag</option><option value="5">Freitag</option><option value="6">Samstag</option><option value="0">Sonntag</option>
-      </select>
-      <input id="md" type="number" min="1" max="31" value="1" placeholder="Tag im Monat" hidden style="margin-top:10px">
+      <div class="everyrow" id="everyrow" hidden>
+        <span>alle</span>
+        <select id="every" aria-label="Intervall"></select>
+        <span id="everyunit">Tage</span>
+      </div>
+      <div class="wdays" id="wdays" hidden>
+        <button type="button" data-d="1">Mo</button><button type="button" data-d="2">Di</button>
+        <button type="button" data-d="3">Mi</button><button type="button" data-d="4">Do</button>
+        <button type="button" data-d="5">Fr</button><button type="button" data-d="6">Sa</button>
+        <button type="button" data-d="0">So</button>
+      </div>
+      <select id="md" aria-label="Tag im Monat" hidden></select>
     </div>
     <div class="row2" id="apptopts" hidden>
       <input id="adate" type="date" aria-label="Datum">
@@ -231,7 +244,18 @@ function whenLabel(sec){
   return day+' · '+hm+' Uhr';
 }
 function repLabel(t){
-  return ['Einmalig','Täglich','Wöchentlich ('+WD[t.day]+')','Monatlich ('+t.day+'.)'][t.repeat];
+  const N=Math.max(1,t.every||1);
+  if(t.repeat===1) return N===1?'Täglich':'Alle '+N+' Tage';
+  if(t.repeat===2){
+    const m=t.mask||(1<<(t.day%7));
+    const days=[1,2,3,4,5,6,0].filter(d=>m&(1<<d)).map(d=>WD[d]).join(', ');
+    return (N===1?'Wöchentlich: ':'Alle '+N+' Wochen: ')+days;
+  }
+  if(t.repeat===3){
+    const w=t.day>=31?'Monatsende':'am '+t.day+'.';
+    return N===1?(t.day>=31?w:'Monatlich '+w):'Alle '+N+' Monate, '+w;
+  }
+  return 'Einmalig';
 }
 
 // ---------- Darstellung ----------
@@ -340,7 +364,26 @@ document.addEventListener('click',e=>{
   arm(b,'del'+id,'Löschen?',()=>send({a:'delete',id}));
 });
 
-$('rep').onchange=()=>{ const r=$('rep').value; $('wd').hidden=r!='2'; $('md').hidden=r!='3'; };
+// Wiederholung: Intervall, Wochentage, Tag im Monat
+$('every').innerHTML=Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');
+$('md').innerHTML=Array.from({length:30},(_,i)=>`<option value="${i+1}">am ${i+1}.</option>`).join('')+'<option value="31">am Monatsende</option>';
+function updateRep(){
+  const r=+$('rep').value;
+  $('everyrow').hidden=r===0; $('wdays').hidden=r!==2; $('md').hidden=r!==3;
+  $('everyunit').textContent=['','Tage','Wochen','Monate'][r]||'';
+  const N=+$('every').value;
+  if(r===1) $('everyunit').textContent=N===1?'Tag (jeden Tag)':'Tage';
+  if(r===2) $('everyunit').textContent=N===1?'Woche (jede Woche)':'Wochen';
+  if(r===3) $('everyunit').textContent=N===1?'Monat (jeden Monat)':'Monate';
+  if(r===2&&!$('wdays').querySelector('[aria-pressed="true"]')){
+    const b=$('wdays').querySelector(`[data-d="${new Date().getDay()}"]`); if(b) b.setAttribute('aria-pressed','true');
+  }
+}
+$('rep').onchange=updateRep; $('every').onchange=updateRep;
+$('wdays').addEventListener('click',e=>{ const b=e.target.closest('button[data-d]'); if(!b) return;
+  b.setAttribute('aria-pressed',String(b.getAttribute('aria-pressed')!=='true')); });
+$('md').value=String(new Date().getDate()>30?31:new Date().getDate());
+updateRep();
 $('f').onsubmit=e=>{
   e.preventDefault();
   const title=$('title').value.trim(); if(!title) return;
@@ -353,8 +396,10 @@ $('f').onsubmit=e=>{
   } else if(page){
     send({a:'add',page,kind:2,title,prio});
   } else {
-    const r=+$('rep').value;
-    send({a:'add',page:0,kind:0,title,prio,repeat:r,day:r==2?+$('wd').value:r==3?+$('md').value:1});
+    const r=+$('rep').value, every=+$('every').value||1;
+    let mask=0; $('wdays').querySelectorAll('[aria-pressed="true"]').forEach(b=>mask|=1<<+b.dataset.d);
+    if(r===2&&!mask){ alertBox('Bitte mindestens einen Wochentag wählen.'); return; }
+    send({a:'add',page:0,kind:0,title,prio,repeat:r,every:r?every:1,mask:r===2?mask:0,day:r===3?+$('md').value:1});
   }
   $('title').value='';
 };
